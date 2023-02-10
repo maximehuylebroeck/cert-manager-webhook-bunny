@@ -2,6 +2,5 @@
   "apiSecretRef": {
     "Name": "bunny-credentials",
     "Key": "accessKey"
-  },
-  "zoneId": 111111
+  }
 }
