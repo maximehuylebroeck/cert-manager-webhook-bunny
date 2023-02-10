@@ -1,10 +1,7 @@
 {
-	"accessKeySecretRef": {
-		"name": "bunny-secret",
-		"key": "BUNNY_ACCESS_KEY"
-	},
-	"zoneIDSecretRef": {
-		"name": "bunny-secret",
-		"key": "BUNNY_ZONE_ID"
-	}
+  "apiSecretRef": {
+    "Name": "bunny-credentials",
+    "Key": "accessKey"
+  },
+  "zoneId": 111111
 }

@@ -8,7 +8,9 @@ import (
 	"os"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -18,13 +20,13 @@ import (
 	bunny "github.com/simplesurance/bunny-go"
 )
 
-type bunnyDNSSolver struct {
+type bunnySolver struct {
 	client *kubernetes.Clientset
 }
 
-type bunnyDNSConfig struct {
-	AccessKey string `json:"accessKeySecretRef"`
-	ZoneID int64 `json:"zoneIDSecretRef"`
+type bunnyConfig struct {
+	AccessKeySecretRef corev1.SecretKeySelector `json:"apiSecretRef"`
+	ZoneID int64 `json:"zoneId"`
 }
 
 var GroupName = os.Getenv("GROUP_NAME")
@@ -35,42 +37,25 @@ func main() {
 	}
 
 	cmd.RunWebhookServer(GroupName,
-		&bunnyDNSSolver{},
+		&bunnySolver{},
 	)
 }
 
-func (c *bunnyDNSSolver) Name() string {
+func (c *bunnySolver) Name() string {
 	return "bunny"
 }
 
-func loadConfig(cfgJSON *extapi.JSON) (bunnyDNSConfig, error) {
-	cfg := bunnyDNSConfig{}
-
-	// handle the 'base case' where no configuration has been provided
-	if cfgJSON == nil {
-		return cfg, nil
-	}
-	if err := json.Unmarshal(cfgJSON.Raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("error decoding solver config: %v", err)
-	}
-	return cfg, nil
-}
-
-// Present is responsible for actually presenting the DNS record with the
-// DNS provider.
-func (c *bunnyDNSSolver) Present(ch *v1alpha1.ChallengeRequest) error {
-	cfg, err := loadConfig(ch.Config)
+func (c *bunnySolver) Present(ch *v1alpha1.ChallengeRequest) error {
+	bunnyClient, cfg, err := c.newAPIClient(ch)
 	if err != nil {
 		return err
 	}
 
 	recordName := strings.TrimSuffix(strings.TrimSuffix(ch.ResolvedFQDN, ch.ResolvedZone), ".")
-
-	val, err := c.HasTXTRecord(cfg, recordName, ch.Key)
+	val, err := c.hasTXTRecord(bunnyClient, recordName, ch.Key, cfg.ZoneID)
 	if err != nil {
 		return err
 	}
-
 	// The record is already there.
 	if val != nil {
 		log.Println("TXT record is present, skipping")
@@ -87,8 +72,7 @@ func (c *bunnyDNSSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	}
 
 	log.Printf("attempting to add record: value=%s, recordname=%s\n", ch.Key, recordName)
-	api := bunny.NewClient(cfg.AccessKey)
-	_, err = api.DNSZone.AddDNSRecord(context.Background(), cfg.ZoneID, record)
+	_, err = bunnyClient.DNSZone.AddDNSRecord(context.Background(), cfg.ZoneID, record)
 	if err != nil {
 		return fmt.Errorf("failed to add TXT record: %s", err.Error())
 	}
@@ -96,20 +80,15 @@ func (c *bunnyDNSSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	return nil
 }
 
-// If multiple TXT records exist with the same record name (e.g.
-// _acme-challenge.example.com) then **only** the record with the same `key`
-// value provided on the ChallengeRequest should be cleaned up.
-// This is in order to facilitate multiple DNS validations for the same domain
-// concurrently.
-func (c *bunnyDNSSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
-	cfg, err := loadConfig(ch.Config)
+func (c *bunnySolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
+	bunnyClient, cfg, err := c.newAPIClient(ch)
 	if err != nil {
 		return err
 	}
 
 	recordName := strings.TrimSuffix(strings.TrimSuffix(ch.ResolvedFQDN, ch.ResolvedZone), ".")
 
-	record, err := c.HasTXTRecord(cfg, recordName, ch.Key)
+	record, err := c.hasTXTRecord(bunnyClient, recordName, ch.Key, cfg.ZoneID)
 	if err != nil {
 		return fmt.Errorf("failed to get zone records: %v", err)
 	}
@@ -117,8 +96,7 @@ func (c *bunnyDNSSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 		return nil
 	}
 
-	api := bunny.NewClient(cfg.AccessKey)
-	if err := api.DNSZone.DeleteDNSRecord(context.Background(), cfg.ZoneID,
+	if err := bunnyClient.DNSZone.DeleteDNSRecord(context.Background(), cfg.ZoneID,
 	    *record.ID); err != nil {
 		return fmt.Errorf("failed to delete TXT record: %v", err)
 	}
@@ -126,7 +104,7 @@ func (c *bunnyDNSSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	return nil
 }
 
-func (c *bunnyDNSSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
+func (c *bunnySolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
 	cl, err := kubernetes.NewForConfig(kubeClientConfig)
 	if err != nil {
 		return err
@@ -135,9 +113,52 @@ func (c *bunnyDNSSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan
 	return nil
 }
 
-func (c *bunnyDNSSolver) HasTXTRecord(cfg bunnyDNSConfig, name, key string) (*bunny.DNSRecord, error) {
-	api := bunny.NewClient(cfg.AccessKey)
-	zone, err := api.DNSZone.Get(context.Background(), cfg.ZoneID)
+func loadConfig(cfgJSON *extapi.JSON) (bunnyConfig, error) {
+	cfg := bunnyConfig{}
+
+	// handle the 'base case' where no configuration has been provided
+	if cfgJSON == nil {
+		return cfg, nil
+	}
+	if err := json.Unmarshal(cfgJSON.Raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("error decoding solver config: %v", err)
+	}
+	return cfg, nil
+}
+
+func (c *bunnySolver) getAccessKeyFromSecret(ref corev1.SecretKeySelector, namespace string) (string, error) {
+	if ref.Name == "" {
+		return "", fmt.Errorf("undefined access key secret")
+	}
+
+	secret, err := c.client.CoreV1().Secrets(namespace).Get(context.TODO(), ref.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+
+	accessKey, ok := secret.Data[ref.Key]
+	if !ok {
+		return "", fmt.Errorf("key not found %q in secret '%s/%s'", ref.Key, namespace, ref.Name)
+	}
+	return string(accessKey), nil
+}
+
+func (c *bunnySolver) newAPIClient(ch *v1alpha1.ChallengeRequest) (*bunny.Client, bunnyConfig, error) {
+	cfg, err := loadConfig(ch.Config)
+	if err != nil {
+		return nil, cfg, err
+	}
+
+	accessKey, err := c.getAccessKeyFromSecret(cfg.AccessKeySecretRef, ch.ResourceNamespace)
+	if err != nil {
+		return nil, cfg, err
+	}
+
+	return bunny.NewClient(accessKey), cfg, nil
+}
+
+func (c *bunnySolver) hasTXTRecord(client *bunny.Client, name, key string, zoneId int64) (*bunny.DNSRecord, error) {
+	zone, err := client.DNSZone.Get(context.Background(), zoneId)
 	if err != nil {
 		return nil, fmt.Errorf("error getting zone records: %v", err)
 	}

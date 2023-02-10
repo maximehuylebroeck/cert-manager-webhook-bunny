@@ -16,7 +16,7 @@ func TestRunsSuite(t *testing.T) {
 	// snippet of valid configuration that should be included on the
 	// ChallengeRequest passed as part of the test cases.
 
-	fixture := dns.NewFixture(&bunnyDNSSolver{},
+	fixture := dns.NewFixture(&bunnySolver{},
 		dns.SetResolvedZone(zone),
 		dns.SetManifestPath("testdata/bunny"),
 		dns.SetDNSServer("9.9.9.9:53"),
