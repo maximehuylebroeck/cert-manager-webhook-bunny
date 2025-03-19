@@ -10,7 +10,7 @@ else they will have undetermined behaviour when used with cert-manager.
 **It is essential that you configure and run the test suite when creating a
 DNS01 webhook.**
 
-An example Go test file has been provided in [main_test.go](https://gitlab.com/digilol/cert-manager-webhook-bunny/-/blob/master/main_test.go).
+An example Go test file has been provided in [main_test.go](https://gitlab.com/maximehuylebroeck/cert-manager-webhook-bunny/-/blob/master/main_test.go).
 
 You can run the test suite with:
 
@@ -26,7 +26,7 @@ Chart is based on: https://github.com/vadimkim/cert-manager-webhook-hetzner/
 
 ### Using public helm chart
 ```bash
-helm repo add cert-manager-webhook-bunny  https://schmitzis.github.io/cert-manager-webhook-bunny /
+helm repo add cert-manager-webhook-bunny  https://maximehuylebroeck.github.io/cert-manager-webhook-bunny /
 # Replace the groupName value with your desired domain
 helm install --namespace cert-manager cert-manager-webhook-bunny cert-manager-webhook-bunny/cert-manager-webhook-bunny --set groupName=acme.bunny.net
 ```
