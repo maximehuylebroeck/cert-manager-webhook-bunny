@@ -13,7 +13,7 @@ certManager:
   serviceAccountName: cert-manager
 
 image:
-  repository: ghcr.io/schmitzis/cert-manager-webhook-bunny
+  repository: ghcr.io/maximehuylebroeck/cert-manager-webhook-bunny
   tag: latest
   pullPolicy: Always
 
