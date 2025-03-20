@@ -1,4 +1,4 @@
-module gitlab.com/digilol/cert-manager-webhook-bunny
+module github.com/maximehuylebroeck/cert-manager-webhook-bunny
 
 go 1.19
 
