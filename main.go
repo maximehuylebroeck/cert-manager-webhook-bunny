@@ -64,12 +64,12 @@ func (c *bunnySolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	recordType := 3
 	var ttl int32 = 120
 	record := &bunny.AddOrUpdateDNSRecordOptions{
-		Type: &recordType,
+		Type:  &recordType,
 		Value: &ch.Key,
-		Name: &recordName,
-		TTL: &ttl,
+		Name:  &recordName,
+		TTL:   &ttl,
 	}
-	_, err = bunnyClient.DNSZone.AddDNSRecord(context.Background(), zoneID, record)
+	_, err = bunnyClient.AddDNSRecord(context.Background(), zoneID, record)
 	if err != nil {
 		return fmt.Errorf("failed to add TXT record: %s", err.Error())
 	}
@@ -93,8 +93,8 @@ func (c *bunnySolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	if record == nil {
 		return nil
 	}
-	if err := bunnyClient.DNSZone.DeleteDNSRecord(context.Background(), zoneID,
-	    *record.ID); err != nil {
+	if err := bunnyClient.DeleteDNSRecord(context.Background(), zoneID,
+		*record.ID); err != nil {
 		return fmt.Errorf("failed to delete TXT record: %v", err)
 	}
 	return nil
@@ -135,7 +135,7 @@ func (c *bunnySolver) getAccessKeyFromSecret(ref corev1.SecretKeySelector, names
 	return string(accessKey), nil
 }
 
-func (c *bunnySolver) newAPIClient(ch *v1alpha1.ChallengeRequest) (*bunny.Client, error) {
+func (c *bunnySolver) newAPIClient(ch *v1alpha1.ChallengeRequest) (bunnyDNSClient, error) {
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
 		return nil, err
@@ -144,11 +144,11 @@ func (c *bunnySolver) newAPIClient(ch *v1alpha1.ChallengeRequest) (*bunny.Client
 	if err != nil {
 		return nil, err
 	}
-	return bunny.NewClient(accessKey), nil
+	return newBunnyDNSClient(accessKey), nil
 }
 
-func (c *bunnySolver) hasTXTRecord(client *bunny.Client, name, key string, zoneId int64) (*bunny.DNSRecord, error) {
-	zone, err := client.DNSZone.Get(context.Background(), zoneId)
+func (c *bunnySolver) hasTXTRecord(client bunnyDNSClient, name, key string, zoneId int64) (*bunny.DNSRecord, error) {
+	zone, err := client.Get(context.Background(), zoneId)
 	if err != nil {
 		return nil, fmt.Errorf("error getting zone records: %v", err)
 	}
@@ -160,15 +160,15 @@ func (c *bunnySolver) hasTXTRecord(client *bunny.Client, name, key string, zoneI
 	return nil, nil
 }
 
-func (c *bunnySolver) resolveZoneId(client *bunny.Client, zoneName string) (int64, error) {
+func (c *bunnySolver) resolveZoneId(client bunnyDNSClient, zoneName string) (int64, error) {
 	domain := strings.TrimSuffix(zoneName, ".")
 	var i int32
 	for i = 1; ; i++ {
-		zones, err := client.DNSZone.List(context.Background(),
-		    &bunny.PaginationOptions{
-			Page: i,
-			PerPage: 3,
-		})
+		zones, err := client.List(context.Background(),
+			&bunny.PaginationOptions{
+				Page:    i,
+				PerPage: 3,
+			})
 		if err != nil {
 			return 0, err
 		}
